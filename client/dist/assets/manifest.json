@@ -1,0 +1,14 @@
+{
+  "sprites": {
+    "ship": "/public/assets/ship.png",
+    "enemy": "/public/assets/enemy.png"
+  },
+  "audio": {
+    "shoot": "/public/assets/shoot.mp3",
+    "explosion": "/public/assets/explosion.mp3"
+  },
+  "rooms": [
+    { "id": "room-1", "name": "Alpha Sector", "maxPlayers": 4 },
+    { "id": "room-2", "name": "Beta Void", "maxPlayers": 8 }
+  ]
+}
