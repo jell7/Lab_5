@@ -51,7 +51,33 @@ const server = http.createServer((req, res) => {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       return res.end('Forbidden');
     }
+// Статистика тіків сервера та налаштування мережі
+  if (req.method === 'GET' && req.url === '/api/stats') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(roomManager.getStats()));
+    return;
+  }
 
+  // Налаштування штучної затримки / джиттера / втрат пакетів
+  if (req.method === 'POST' && req.url === '/api/net') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk.toString();
+      if (body.length > 4096) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        const cfg = JSON.parse(body);
+        netSim.configure(cfg);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(netSim.getConfig()));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
     const filePath = path.join(LOG_DIR, filename);
     if (!fs.existsSync(filePath)) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });

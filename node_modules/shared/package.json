@@ -1,0 +1,10 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./sim": "./src/sim/index.js",
+    "./protocol": "./src/protocol/index.js",
+    "./codec": "./src/codec/index.js"
+  }
+}

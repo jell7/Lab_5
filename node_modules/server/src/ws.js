@@ -1,18 +1,22 @@
 import { WebSocketServer } from 'ws';
 import { validateMessage } from './protocol.js';
 import { roomManager } from './rooms.js';
+import { netSim } from './netSim.js';
+
+let nextPlayerNum = 1;
 
 export function setupWebSocket(server) {
   const wss = new WebSocketServer({ server, maxPayload: 4096 });
 
   wss.on('connection', (socket) => {
     socket.isAlive = true;
+    const playerId = nextPlayerNum++;
     let playerRoom = null;
     let playerName = null;
     let messageCount = 0;
 
-    socket.on('pong', () => { 
-      socket.isAlive = true; 
+    socket.on('pong', () => {
+      socket.isAlive = true;
     });
 
     socket.on('error', (err) => {
@@ -23,19 +27,18 @@ export function setupWebSocket(server) {
       if (!playerRoom) socket.close(1008, 'Join timeout');
     }, 5000);
 
-    const rateLimitInterval = setInterval(() => { 
-      messageCount = 0; 
+    const rateLimitInterval = setInterval(() => {
+      messageCount = 0;
     }, 1000);
 
-    socket.on('message', (rawData) => {
+    socket.on('message', (rawData, isBinary) => {
       messageCount++;
-      
-      if (messageCount > 20) {
+      if (messageCount > 60) {
         socket.close(1008, 'Rate limit exceeded');
         return;
       }
 
-      const msg = validateMessage(rawData);
+      const msg = validateMessage(rawData, isBinary);
       if (!msg) {
         socket.close(1007, 'Invalid protocol');
         return;
@@ -47,20 +50,43 @@ export function setupWebSocket(server) {
 
       if (msg.type === 'join') {
         clearTimeout(joinTimeout);
-        playerName = msg.name || 'Anonymous';
-        const room = roomManager.rooms.get(msg.room);
-        
-        if (!room) {
-          socket.close(1008, 'Room not found');
-          return;
-        }
+        playerName = msg.name || `Player_${playerId}`;
+        const useBinary = msg.codec !== 'json';
+        const room = roomManager.rooms.get(msg.room) || roomManager.createRoom(msg.room);
         playerRoom = room;
-        playerRoom.join(socket, playerName);
-      } 
-      else if (msg.type === 'chat' && playerRoom) {
-        playerRoom.chat(playerName, msg.text);
-      } 
-      else {
+
+        netSim.sendWithDelay(() => {
+          if (socket.readyState === 1) {
+            socket.send(JSON.stringify({
+              type: 'welcome',
+              playerId,
+              room: room.id,
+              seed: room.world.seed,
+            }));
+            playerRoom.join(socket, playerName, playerId, useBinary);
+          }
+        });
+      } else if (msg.type === 'codec' && playerRoom) {
+        playerRoom.setPlayerCodec(socket, msg.codec !== 'json');
+      } else if (msg.type === 'ping_rtt') {
+        netSim.sendWithDelay(() => {
+          if (socket.readyState === 1) {
+            socket.send(JSON.stringify({ type: 'pong_rtt', t: msg.t }));
+          }
+        });
+      } else if (msg.type === 'input' && playerRoom) {
+        netSim.sendWithDelay(() => {
+          if (playerRoom && socket.readyState === 1) {
+            playerRoom.queueInput(playerId, msg);
+          }
+        });
+      } else if (msg.type === 'chat' && playerRoom) {
+        netSim.sendWithDelay(() => {
+          if (playerRoom && socket.readyState === 1) {
+            playerRoom.chat(playerName, msg.text);
+          }
+        });
+      } else {
         socket.close(1007, 'Unknown type');
       }
     });
@@ -68,16 +94,15 @@ export function setupWebSocket(server) {
     socket.on('close', () => {
       clearInterval(rateLimitInterval);
       if (playerRoom) {
-        playerRoom.leave(socket, playerName);
+        playerRoom.leave(socket, playerName, playerId);
       }
     });
   });
 
-  // Перевірка "мертвих" з'єднань кожні 15 секунд (перевірка пінгів)
   const interval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        return ws.terminate(); // Розриваємо з'єднання, якщо клієнт не відповів на ping
+        return ws.terminate();
       }
       ws.isAlive = false;
       ws.ping();
